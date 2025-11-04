@@ -4,12 +4,15 @@ import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { RetrievalQAChain } from "langchain/chains";
+import { Document } from "@langchain/core/documents";
 import * as fs from "fs";
+import { OCRProcessor } from "./ocrProcessor";
 
 export class PDFChatbot {
   private chain: RetrievalQAChain | null = null;
   private model: ChatOllama;
   private embeddings: OllamaEmbeddings;
+  private ocrProcessor: OCRProcessor;
 
   constructor(modelName: string = "llama3.2") {
     this.model = new ChatOllama({
@@ -22,20 +25,37 @@ export class PDFChatbot {
       model: modelName,
       baseUrl: "http://localhost:11434",
     });
+
+    this.ocrProcessor = new OCRProcessor();
   }
 
-  async loadPDF(pdfPath: string): Promise<void> {
+  async loadPDF(pdfPath: string, useOCR: boolean = true): Promise<void> {
     if (!fs.existsSync(pdfPath)) {
       throw new Error(`PDF file not found: ${pdfPath}`);
     }
 
     console.log(`Loading PDF from: ${pdfPath}`);
     
-    // Load PDF
-    const loader = new PDFLoader(pdfPath);
-    const docs = await loader.load();
+    let docs: Document[];
 
-    console.log(`Loaded ${docs.length} pages from PDF`);
+    if (useOCR) {
+      // Use OCR to extract text from handwritten/scanned PDFs
+      console.log("Using OCR to extract text...");
+      const ocrText = await this.ocrProcessor.extractTextFromPDF(pdfPath);
+      
+      docs = [
+        new Document({
+          pageContent: ocrText,
+          metadata: { source: pdfPath, method: "ocr" },
+        }),
+      ];
+    } else {
+      // Standard PDF text extraction
+      const loader = new PDFLoader(pdfPath);
+      docs = await loader.load();
+    }
+
+    console.log(`Loaded ${docs.length} document(s) from PDF`);
 
     // Split documents into chunks
     const textSplitter = new RecursiveCharacterTextSplitter({
